@@ -24,14 +24,19 @@ export class BitmapServer extends JDServiceServer {
     constructor(options?: BitmapServerOptions) {
         super(SRV_BITMAP, options)
 
-        const { width = 160, 
-                height = 120, 
-                palette = [0xff0000, 0xffffff],
-            } = options || {}
+        const {
+            width = 160,
+            height = 120,
+            palette = [
+                0x000000, 0xffffff, 0xff2121, 0xff93c4, 0xff8135, 0xfff609,
+                0x249ca3, 0x78dc52, 0x003fad, 0x87f2ff, 0x8e2ec4, 0xa4839f,
+                0x5c406c, 0xe5cdc4, 0x91463d, 0x000000,
+            ],
+        } = options || {}
 
         this.width = this.addRegister(BitmapReg.Width, [width])
         this.height = this.addRegister(BitmapReg.Height, [height])
-        
+
         const pbuf = new Uint8Array(palette.length << 2)
         for (let i = 0; i < palette.length; ++i) {
             pbuf[i * 4] = (palette[i] >> 16) & 0xff
