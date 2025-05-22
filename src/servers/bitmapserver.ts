@@ -50,6 +50,10 @@ export class BitmapServer extends JDServiceServer {
         this.addCommand(BitmapCmd.Fill, this.handleFill.bind(this))
     }
 
+    pixels() {
+        return this._pixels
+    }
+    
     handleFill(pkt: Packet) {
         // get the color index
     }
