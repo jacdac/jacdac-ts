@@ -1,3 +1,4 @@
+import { BitmapCmd, BitmapReg, SRV_BITMAP } from "../jdom/constants"
 import { jdpack, jdunpack } from "../jdom/pack"
 import { Packet } from "../jdom/packet"
 import { JDRegisterServer } from "../jdom/servers/registerserver"
