@@ -37,6 +37,7 @@ export class BitmapServer extends JDServiceServer {
 
         this.width = this.addRegister(BitmapReg.Width, [width])
         this.height = this.addRegister(BitmapReg.Height, [height])
+        this._pixels = new ImageData(width, height)
 
         const pbuf = new Uint8Array(palette.length << 2)
         for (let i = 0; i < palette.length; ++i) {
@@ -59,9 +60,13 @@ export class BitmapServer extends JDServiceServer {
             pkt.data,
             "u8",
         )
-        if (color_index < this._palette.length) {
-            const color = this._palette[color_index]
-            this._pixels.data.fill(this._palette[color])
+        if (color_index < this._palette.length >> 2) {
+            const index = color_index << 2
+            for(let i = 0; i < this._pixels.data.length; i+=4) {
+                for (let j = 0; j < 4; j++) {
+                    this._pixels.data[i+j] = this._palette[index+j]
+                }
+            }
             this.emit(CHANGE)
         }
     }
