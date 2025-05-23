@@ -1,4 +1,4 @@
-import { BitmapCmd, BitmapReg, SRV_BITMAP } from "../jdom/constants"
+import { BitmapCmd, BitmapReg, CHANGE, SRV_BITMAP } from "../jdom/constants"
 import { jdpack, jdunpack } from "../jdom/pack"
 import { Packet } from "../jdom/packet"
 import { JDRegisterServer } from "../jdom/servers/registerserver"
@@ -50,11 +50,19 @@ export class BitmapServer extends JDServiceServer {
         this.addCommand(BitmapCmd.Fill, this.handleFill.bind(this))
     }
 
-    pixels() {
+    get pixels() {
         return this._pixels
     }
     
     handleFill(pkt: Packet) {
-        // get the color index
+        const [color_index] = jdunpack<[number]>(
+            pkt.data,
+            "u8",
+        )
+        if (color_index < this._palette.length) {
+            const color = this._palette[color_index]
+            this._pixels.data.fill(this._palette[color])
+            this.emit(CHANGE)
+        }
     }
 }
