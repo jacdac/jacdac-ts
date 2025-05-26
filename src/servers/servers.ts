@@ -100,6 +100,7 @@ import {
     SystemReg,
     SRV_ROS,
     SRV_INDEXED_SCREEN,
+    SRV_BITMAP,
     SRV_PCMONITOR,
     SRV_PCCONTROLLER,
 } from "../jdom/constants"
@@ -172,6 +173,7 @@ import { randomDeviceId } from "../jdom/random"
 import { SevenSegmentDisplayServer } from "./sevensegmentdisplayserver"
 import { PCMonitorServer } from "./pcmonitorserver"
 import { PCControllerServer } from "./pccontrollerserver"
+import { BitmapServer } from "./bitmapserver"
 
 const indoorThermometerOptions: AnalogSensorServerOptions = {
     readingValues: [21.5],
@@ -1799,6 +1801,16 @@ function initProviders() {
                             0x8e2ec4, 0xa4839f, 0x5c406c, 0xe5cdc4, 0x91463d,
                             0x000000,
                         ],
+                    }),
+                ],
+            },
+            {
+                name: "Bitmap (160x120) with 4-bit color",
+                serviceClasses: [SRV_BITMAP],
+                services: () => [
+                    new BitmapServer({
+                        width: 160,
+                        height: 120
                     }),
                 ],
             },
