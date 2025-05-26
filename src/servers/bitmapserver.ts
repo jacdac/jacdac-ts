@@ -19,7 +19,7 @@ export class BitmapServer extends JDServiceServer {
     readonly width: JDRegisterServer<[number]>
     readonly height: JDRegisterServer<[number]>
 
-    private _palette: Uint8Array
+    private _palette: string[]
     private _canvas: HTMLCanvasElement
     private _context: CanvasRenderingContext2D 
 
@@ -44,14 +44,13 @@ export class BitmapServer extends JDServiceServer {
         this._canvas.height = height
         this._context = this._canvas.getContext("2d");
 
-        const pbuf = new Uint8Array(palette.length << 2)
+        this._palette = []
         for (let i = 0; i < palette.length; ++i) {
-            pbuf[i * 4] = (palette[i] >> 16) & 0xff
-            pbuf[i * 4 + 1] = (palette[i] >> 8) & 0xff
-            pbuf[i * 4 + 2] = palette[i] & 0xff
-            pbuf[i * 4 + 3] = 0xff
+            const r = (palette[i] >> 16) & 0xff
+            const g = (palette[i] >> 8) & 0xff
+            const b = palette[i] & 0xff
+            this._palette.push(`rgb(${r},${g},${b})`)
         }
-        this._palette = pbuf
 
         this.addCommand(BitmapCmd.Fill, this.handleFill.bind(this))
     }
@@ -59,22 +58,14 @@ export class BitmapServer extends JDServiceServer {
     get canvas() {
         return this._canvas
     }
-    
-    private getRgb(color_index: number) {
-        const index = color_index << 2
-        const r = this._palette[index]
-        const g = this._palette[index+1]
-        const b = this._palette[index+2]
-        return `rgb(${r},${g},${b})`
-    }
 
     handleFill(pkt: Packet) {
         const [color_index] = jdunpack<[number]>(
             pkt.data,
             "u8",
         )
-        if (color_index < this._palette.length >> 2) {
-            this._context.fillStyle = this.getRgb(color_index)
+        if (color_index < this._palette.length) {
+            this._context.fillStyle = this._palette[color_index]
             this._context.fillRect(0, 0, this.canvas.width, this.canvas.height);
             this.emit(CHANGE)
         }
