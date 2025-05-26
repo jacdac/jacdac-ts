@@ -20,7 +20,8 @@ export class BitmapServer extends JDServiceServer {
     readonly height: JDRegisterServer<[number]>
 
     private _palette: Uint8Array
-    private _pixels: ImageData
+    private _canvas: HTMLCanvasElement
+    private _context: CanvasRenderingContext2D 
 
     constructor(options?: BitmapServerOptions) {
         super(SRV_BITMAP, options)
@@ -37,7 +38,11 @@ export class BitmapServer extends JDServiceServer {
 
         this.width = this.addRegister(BitmapReg.Width, [width])
         this.height = this.addRegister(BitmapReg.Height, [height])
-        this._pixels = new ImageData(width, height)
+        const canvas = document.createElement("canvas");
+        this._canvas = canvas
+        this._canvas.width = width
+        this._canvas.height = height
+        this._context = this._canvas.getContext("2d");
 
         const pbuf = new Uint8Array(palette.length << 2)
         for (let i = 0; i < palette.length; ++i) {
@@ -51,22 +56,26 @@ export class BitmapServer extends JDServiceServer {
         this.addCommand(BitmapCmd.Fill, this.handleFill.bind(this))
     }
 
-    get pixels() {
-        return this._pixels
+    get canvas() {
+        return this._canvas
     }
     
+    private getRgb(color_index: number) {
+        const index = color_index << 2
+        const r = this._palette[index]
+        const g = this._palette[index+1]
+        const b = this._palette[index+2]
+        return `rgb(${r},${g},${b})`
+    }
+
     handleFill(pkt: Packet) {
         const [color_index] = jdunpack<[number]>(
             pkt.data,
             "u8",
         )
         if (color_index < this._palette.length >> 2) {
-            const index = color_index << 2
-            for(let i = 0; i < this._pixels.data.length; i+=4) {
-                for (let j = 0; j < 4; j++) {
-                    this._pixels.data[i+j] = this._palette[index+j]
-                }
-            }
+            this._context.fillStyle = this.getRgb(color_index)
+            this._context.fillRect(0, 0, this.canvas.width, this.canvas.height);
             this.emit(CHANGE)
         }
     }
