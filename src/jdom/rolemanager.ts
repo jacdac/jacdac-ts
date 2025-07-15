@@ -375,20 +375,3 @@ export function startRoles<
     update()
     return unsubscribe
 }
-
-/*
-function test(bus: JDBus) {
-    const bindings = {
-        thermo1: { serviceClass: SRV_BUTTON },
-        thermo2: { serviceClass: SRV_BUTTON },
-    }
-    trackRoles(
-        bus,
-        bindings,
-        ({ thermo1, thermo2 }) => {
-            console.log({ thermo1, thermo2 })
-        },
-        { incomplete: true }
-    )
-}
-*/
