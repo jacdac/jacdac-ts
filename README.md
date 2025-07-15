@@ -74,14 +74,6 @@ run
 yarn buildspecs
 ```
 
-## Unit tests
-
-We use [Mocha](https://mochajs.org/) to run the unit test suite from `/tests`. To execute the tests,
-
-```
-yarn test
-```
-
 ## Linting
 
 Run the following command to detect linting issues
