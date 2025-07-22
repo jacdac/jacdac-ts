@@ -221,11 +221,10 @@ const barometerOptions: AnalogSensorServerOptions = {
     maxReading: 4000,
 }
 const rpmOptions: AnalogSensorServerOptions = {
-    readingValues: [20],
-    readingError: [1.5],
+    readingValues: [100],
     streamingInterval: 1000,
     minReading: 0,
-    maxReading: 1000,
+    maxReading: 5000,
 }
 const sonarOptions: AnalogSensorServerOptions = {
     variant: DistanceVariant.Ultrasonic,
@@ -414,7 +413,10 @@ function initProviders() {
                 name: "rotations per minute",
                 serviceClasses: [SRV_ROTATIONS_PER_MINUTE],
                 services: () => [
-                    new AnalogSensorServer(SRV_ROTATIONS_PER_MINUTE, rpmOptions),
+                    new AnalogSensorServer(
+                        SRV_ROTATIONS_PER_MINUTE,
+                        rpmOptions,
+                    ),
                 ],
             },
             {
