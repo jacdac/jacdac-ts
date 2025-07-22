@@ -102,6 +102,7 @@ import {
     SRV_INDEXED_SCREEN,
     SRV_PCMONITOR,
     SRV_PCCONTROLLER,
+    SRV_ROTATIONS_PER_MINUTE,
 } from "../jdom/constants"
 import { JDServerServiceProvider } from "../jdom/servers/serverserviceprovider"
 import { ProtocolTestServer } from "../jdom/servers/protocoltestserver"
@@ -218,6 +219,13 @@ const barometerOptions: AnalogSensorServerOptions = {
     streamingInterval: 1000,
     minReading: 150,
     maxReading: 4000,
+}
+const rpmOptions: AnalogSensorServerOptions = {
+    readingValues: [20],
+    readingError: [1.5],
+    streamingInterval: 1000,
+    minReading: 0,
+    maxReading: 1000,
 }
 const sonarOptions: AnalogSensorServerOptions = {
     variant: DistanceVariant.Ultrasonic,
@@ -400,6 +408,13 @@ function initProviders() {
                 serviceClasses: [SRV_AIR_PRESSURE],
                 services: () => [
                     new AnalogSensorServer(SRV_AIR_PRESSURE, barometerOptions),
+                ],
+            },
+            {
+                name: "rotations per minute",
+                serviceClasses: [SRV_ROTATIONS_PER_MINUTE],
+                services: () => [
+                    new AnalogSensorServer(SRV_ROTATIONS_PER_MINUTE, rpmOptions),
                 ],
             },
             {
