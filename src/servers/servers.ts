@@ -13,6 +13,7 @@ import {
     SRV_BUTTON,
     SRV_BUZZER,
     SRV_CHARACTER_SCREEN,
+    SRV_CURSOR_CHARACTER_SCREEN,
     SRV_BRAILLE_DISPLAY,
     SRV_DISTANCE,
     SRV_E_CO2,
@@ -174,6 +175,7 @@ import { randomDeviceId } from "../jdom/random"
 import { SevenSegmentDisplayServer } from "./sevensegmentdisplayserver"
 import { PCMonitorServer } from "./pcmonitorserver"
 import { PCControllerServer } from "./pccontrollerserver"
+import { CursorCharacterScreenServer } from "./cursorcharscreenserver"
 
 const indoorThermometerOptions: AnalogSensorServerOptions = {
     readingValues: [21.5],
@@ -228,7 +230,7 @@ const rpmOptions: AnalogSensorServerOptions = {
     maxReading: 5000,
 }
 const ecOptions: AnalogSensorServerOptions = {
-    readingValues: [5.0], // drinking water at 20C 
+    readingValues: [5.0], // drinking water at 20C
     readingError: [10.0],
     streamingInterval: 1000,
     minReading: 0.0,
@@ -525,10 +527,17 @@ function initProviders() {
                         .map((_, i) => new ButtonServer(`C${i}`, true)),
             },
             {
-                name: "character screen (LDC, 16x2)",
+                name: "character screen (LCD, 16x2)",
                 serviceClasses: [SRV_CHARACTER_SCREEN],
                 services: () => [
                     new CharacterScreenServer({ message: "hello\nworld!" }),
+                ],
+            },
+            {
+                name: "cursor character screen (LCD, 16x2)",
+                serviceClasses: [SRV_CURSOR_CHARACTER_SCREEN],
+                services: () => [
+                    new CursorCharacterScreenServer({ message: "hello\nworld!" }),
                 ],
             },
             <ServiceProviderDefinition>{
