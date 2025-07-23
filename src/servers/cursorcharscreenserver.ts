@@ -12,8 +12,8 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     readonly enabled: JDRegisterServer<[number]>
     readonly rows: JDRegisterServer<[number]>
     readonly columns: JDRegisterServer<[number]>
-    private _cursorX: number = 0
-    private _cursorY: number = 0
+    private _cursorX = 0
+    private _cursorY = 0
 
     constructor(options?: {
         message?: string
@@ -78,5 +78,5 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     }
     get cursorY(): number {
         return this._cursorY
-
+    }
 }
