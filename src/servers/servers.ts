@@ -228,11 +228,11 @@ const rpmOptions: AnalogSensorServerOptions = {
     maxReading: 5000,
 }
 const ecOptions: AnalogSensorServerOptions = {
-    readingValues: [1000000],
-    readingError: [1000],
+    readingValues: [5.0], // drinking water at 20C 
+    readingError: [10.0],
     streamingInterval: 1000,
-    minReading: 0.0,           // glass
-    maxReading: 63000000.0,    // silver
+    minReading: 0.0,
+    maxReading: 9990.0,
 }
 const sonarOptions: AnalogSensorServerOptions = {
     variant: DistanceVariant.Ultrasonic,
