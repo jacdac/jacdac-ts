@@ -9,7 +9,7 @@ export function loadSpecifications() {
         specs = JSON.parse(
             readFileSync("../jacdac-spec/dist/services.json", {
                 encoding: "utf-8",
-            })
+            }),
         )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         loadServiceSpecifications(specs as any)

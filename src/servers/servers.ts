@@ -103,6 +103,7 @@ import {
     SRV_PCMONITOR,
     SRV_PCCONTROLLER,
     SRV_ROTATIONS_PER_MINUTE,
+    SRV_ELECTRICAL_CONDUCTIVITY,
 } from "../jdom/constants"
 import { JDServerServiceProvider } from "../jdom/servers/serverserviceprovider"
 import { ProtocolTestServer } from "../jdom/servers/protocoltestserver"
@@ -225,6 +226,13 @@ const rpmOptions: AnalogSensorServerOptions = {
     streamingInterval: 1000,
     minReading: 0,
     maxReading: 5000,
+}
+const ecOptions: AnalogSensorServerOptions = {
+    readingValues: [1000000],
+    readingError: [1000],
+    streamingInterval: 1000,
+    minReading: 0.0,           // glass
+    maxReading: 63000000.0,    // silver
 }
 const sonarOptions: AnalogSensorServerOptions = {
     variant: DistanceVariant.Ultrasonic,
@@ -416,6 +424,16 @@ function initProviders() {
                     new AnalogSensorServer(
                         SRV_ROTATIONS_PER_MINUTE,
                         rpmOptions,
+                    ),
+                ],
+            },
+            {
+                name: "electrical conductivity",
+                serviceClasses: [SRV_ELECTRICAL_CONDUCTIVITY],
+                services: () => [
+                    new AnalogSensorServer(
+                        SRV_ELECTRICAL_CONDUCTIVITY,
+                        ecOptions,
                     ),
                 ],
             },
