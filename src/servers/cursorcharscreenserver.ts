@@ -8,6 +8,8 @@ import { JDRegisterServer } from "../jdom/servers/registerserver"
 import { JDServiceServer } from "../jdom/servers/serviceserver"
 
 export class CursorCharacterScreenServer extends JDServiceServer {
+    static UPDATE = "ccss_update"
+    
     readonly message: JDRegisterServer<[string]>
     readonly enabled: JDRegisterServer<[number]>
     readonly rows: JDRegisterServer<[number]>
@@ -57,6 +59,7 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     private clear() {
         this.message.setValues([""])
         this._setCursor(0, 0)
+        this.emit(CursorCharacterScreenServer.UPDATE)
     }
 
     private setCursor(pkt: Packet) {
