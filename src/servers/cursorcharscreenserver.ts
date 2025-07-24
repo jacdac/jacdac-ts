@@ -8,8 +8,8 @@ import { JDRegisterServer } from "../jdom/servers/registerserver"
 import { JDServiceServer } from "../jdom/servers/serviceserver"
 
 export class CursorCharacterScreenServer extends JDServiceServer {
-    static UPDATE = "ccss_update"
-    
+    static readonly CLEAR = "ccss_clear"
+
     readonly message: JDRegisterServer<[string]>
     readonly enabled: JDRegisterServer<[number]>
     readonly rows: JDRegisterServer<[number]>
@@ -58,8 +58,9 @@ export class CursorCharacterScreenServer extends JDServiceServer {
 
     private clear() {
         this.message.setValues([""])
+        // For now, also home cursor
         this._setCursor(0, 0)
-        this.emit(CursorCharacterScreenServer.UPDATE)
+        this.emit(CursorCharacterScreenServer.CLEAR)
     }
 
     private setCursor(pkt: Packet) {
@@ -70,9 +71,10 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     private _setCursor(x: number, y: number): void {
         const [rows] = this.rows.values()
         const [columns] = this.columns.values()
-        if (x < 0 || x >= columns || y < 0 || y >= rows) {
-            return
-        }
+        if (x < 0) x = 0
+        if (y < 0) y = 0
+        if (columns > 0 && x >= columns) x = columns - 1
+        if (rows > 0 && y >= rows) y = rows - 1
         this._cursorX = x
         this._cursorY = y
     }
