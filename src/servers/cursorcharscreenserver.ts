@@ -54,7 +54,7 @@ export class CursorCharacterScreenServer extends JDServiceServer {
         )
         this.addCommand(
             CursorCharacterScreenCmd.Show,
-            this.show.bind(this),
+            this._show.bind(this),
         )
 
         this.clear() // clear the screen initially
