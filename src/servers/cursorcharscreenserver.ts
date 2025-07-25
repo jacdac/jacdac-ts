@@ -58,14 +58,14 @@ export class CursorCharacterScreenServer extends JDServiceServer {
         )
 
         this.clear() // clear the screen initially
-        if (message) this._show(message)
+        if (message) this.show(message)
     }
   
     public get screen(): string {
         return this._screen.map(row => row.join("")).join("\n")
     }
 
-    private _show(text: string) {
+    public show(text: string) {
         // split the text by newline
         const lines = text.split("\n")
         
@@ -84,16 +84,16 @@ export class CursorCharacterScreenServer extends JDServiceServer {
         this.emit(CursorCharacterScreenServer.UPDATE)
     }
 
-    private show(pkt: Packet) {
+    private _show(pkt: Packet) {
         const [text] = pkt.jdunpack<[string]>("s")
-        this._show(text)
+        this.show(text)
     }
 
     private home() {
         this._setCursor(0, 0)
     }
 
-    private clear() {
+    public clear() {
         this._setCursor(0, 0)
         // clear the screen
         this._screen.forEach(row => row.fill(" "))
