@@ -537,7 +537,9 @@ function initProviders() {
                 name: "cursor character screen (LCD, 16x2)",
                 serviceClasses: [SRV_CURSOR_CHARACTER_SCREEN],
                 services: () => [
-                    new CursorCharacterScreenServer({ message: "hello\nworld!" }),
+                    new CursorCharacterScreenServer({
+                        message: "hello\nworld!",
+                    }),
                 ],
             },
             <ServiceProviderDefinition>{
