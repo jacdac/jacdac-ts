@@ -17,7 +17,7 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     private _screen: Array<Array<string>>
 
     constructor(options?: {
-        message?: string 
+        message?: string
         rows?: number
         columns?: number
         enabled?: number
@@ -52,15 +52,12 @@ export class CursorCharacterScreenServer extends JDServiceServer {
             CursorCharacterScreenCmd.SetCursor,
             this.setCursor.bind(this),
         )
-        this.addCommand(
-            CursorCharacterScreenCmd.Show,
-            this._show.bind(this),
-        )
+        this.addCommand(CursorCharacterScreenCmd.Show, this._show.bind(this))
 
         this.clear() // clear the screen initially
         if (message) this.show(message)
     }
-  
+
     public get screen(): string {
         return this._screen.map(row => row.join("")).join("\n")
     }
@@ -68,7 +65,7 @@ export class CursorCharacterScreenServer extends JDServiceServer {
     public show(text: string) {
         // split the text by newline
         const lines = text.split("\n")
-        
+
         // now start filling from the cursor
         // but don't move the cursor
         for (let i = 0; i < lines.length; i++) {
