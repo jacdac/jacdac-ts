@@ -93,6 +93,44 @@ function parentName(bus: JDBus, role: Role) {
     return role.name.split("/", 1)[0]
 }
 
+function roleQueryArg(role: Role, name: string) {
+    const args = role.query
+        ?.split("&")
+        .map(a => a.split("=", 2))
+        .find(([n]) => n === name)
+    return args?.[1]
+}
+
+function roleServiceKey(deviceId: string, serviceIndex: number) {
+    return `${deviceId}:${serviceIndex}`
+}
+
+function canAssignRoleToService(
+    bus: JDBus,
+    role: Role,
+    service: JDService,
+    assignedRole?: string
+) {
+    if (service.serviceClass !== role.serviceClass) return false
+    if (assignedRole && assignedRole !== role.name) return false
+
+    const deviceId = roleQueryArg(role, ROLE_QUERY_DEVICE)
+    if (deviceId) {
+        const expectedDeviceId =
+            deviceId === ROLE_QUERY_SELF_DEVICE ? bus.selfDeviceId : deviceId
+        if (service.device.deviceId !== expectedDeviceId) return false
+    }
+
+    const serviceIndex = parseInt(
+        roleQueryArg(role, ROLE_QUERY_SERVICE_INDEX),
+        10
+    )
+    if (!isNaN(serviceIndex) && service.serviceIndex !== serviceIndex)
+        return false
+
+    return true
+}
+
 function parseRole(role: Role): ServiceProviderOptions {
     const specification = serviceSpecificationFromClassIdentifier(
         role.serviceClass
@@ -371,9 +409,59 @@ export class RoleManagerClient extends JDServiceClient {
         if (!roles?.length) return
 
         this.log(`unbound roles: ${roles.length}`, { roles })
+
+        // Prefer assigning compatible existing services before spawning sims.
+        const services = this.bus
+            .services()
+            .filter(srv => !isInfrastructure(srv.specification))
+        const claimedServices = new Set<JDService>()
+        const assignedRoleByService = new Map<string, string>()
+        this._roles.forEach(role => {
+            if (!this.bus.device(role.deviceId, true)) return
+            assignedRoleByService.set(
+                roleServiceKey(role.deviceId, role.serviceIndex),
+                role.name
+            )
+        })
+
+        const unresolvedRoles = roles.filter(role => {
+            const service = services.find(
+                srv =>
+                    !claimedServices.has(srv) &&
+                    canAssignRoleToService(
+                        this.bus,
+                        role,
+                        srv,
+                        assignedRoleByService.get(
+                            roleServiceKey(
+                                srv.device.deviceId,
+                                srv.serviceIndex
+                            )
+                        ) || srv.role
+                    )
+            )
+            if (!service) return true
+
+            claimedServices.add(service)
+            assignedRoleByService.set(
+                roleServiceKey(service.device.deviceId, service.serviceIndex),
+                role.name
+            )
+            if (service.role !== role.name)
+                void this.setRole(service, role.name).catch(e =>
+                    this.emit(ERROR, e)
+                )
+            return false
+        })
+        if (!unresolvedRoles.length) return
+
+        this.log(`unresolved roles after assignment: ${unresolvedRoles.length}`, {
+            roles: unresolvedRoles,
+        })
+
         // collect roles that need to be bound
         const todos = groupBy(
-            roles
+            unresolvedRoles
                 .map(role => ({
                     role,
                     hostDefinition: serviceProviderDefinitionFromServiceClass(
