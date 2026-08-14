@@ -365,15 +365,30 @@ export class RoleManagerClient extends JDServiceClient {
 
     startSimulators() {
         this.log(`start role sims`, { roles: this._roles })
-        const roles = this._roles.filter(
+        const unboundRoles = this._roles.filter(
             role => !this.bus.device(role.deviceId, true)
         )
-        if (!roles?.length) return
+        if (!unboundRoles?.length) return
 
-        this.log(`unbound roles: ${roles.length}`, { roles })
+        this.log(`unbound roles: ${unboundRoles.length}`, { roles: unboundRoles })
+
+        // collect unbound services?
+        const unboundServices = this.bus.services().filter(srv => !srv.role)
+        // match unbound roles with unbound services
+        unboundRoles.forEach(role => {
+            const service = unboundServices.find(
+                srv => srv.serviceClass === role.serviceClass
+            )
+            if (service) {
+                unboundServices.splice(unboundServices.indexOf(service), 1)
+                unboundRoles.splice(unboundRoles.indexOf(role), 1)
+                this.setRole(service, role.name)
+            }
+        })
+
         // collect roles that need to be bound
         const todos = groupBy(
-            roles
+            unboundRoles
                 .map(role => ({
                     role,
                     hostDefinition: serviceProviderDefinitionFromServiceClass(
