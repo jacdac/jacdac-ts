@@ -18,6 +18,7 @@ import {
     SELF_ANNOUNCE,
     SystemEvent,
 } from "../constants"
+import { JDDevice } from "../device"
 import { JDEvent } from "../event"
 import { jdpack, jdunpack, PackedSimpleValue } from "../pack"
 import { Packet } from "../packet"
@@ -91,6 +92,19 @@ function parentName(bus: JDBus, role: Role) {
         return deviceId
     }
     return role.name.split("/", 1)[0]
+}
+
+function serviceKey(service: JDService): string {
+    return `${service.device.deviceId}:${service.serviceIndex}`
+}
+
+// stable ordering so re-polling identical roles never looks like a change due to device-side reordering
+function compareRoles(l: Role, r: Role): number {
+    return (
+        l.deviceId.localeCompare(r.deviceId) ||
+        l.serviceIndex - r.serviceIndex ||
+        l.name.localeCompare(r.name)
+    )
 }
 
 function parseRole(role: Role): ServiceProviderOptions {
@@ -172,7 +186,20 @@ function parseRole(role: Role): ServiceProviderOptions {
 export class RoleManagerClient extends JDServiceClient {
     private _roles: Role[] = []
     private _needRefresh = true
+    private _refreshing = false
     private _lastRefreshAttempt = 0
+    // roles for which a simulator/provider has already been requested but not yet
+    // confirmed bound, to avoid spawning duplicates while waiting for that confirmation
+    private _pendingSimRoleNames = new Set<string>()
+    // roles waiting to be bound to a specific spawned device, keyed by that device's id,
+    // since a freshly spawned provider isn't announced (and can't be setRole()'d) yet
+    private _pendingSimDeviceRoles = new Map<string, Role[]>()
+    // services with an in-flight reuse setRole() request not yet confirmed by a fresh
+    // ListRoles poll; `service.role` alone isn't enough since it only updates on confirmation
+    private _pendingReuseServiceKeys = new Set<string>()
+    // serializes automatically-triggered setRole() calls so concurrent SetRole commands
+    // don't race each other on the shared ack-tracking mechanism
+    private _setRoleQueue: Promise<void> = Promise.resolve()
     public readonly changeEvent: JDEvent
     public readonly startRefreshRoles: () => void
 
@@ -192,7 +219,10 @@ export class RoleManagerClient extends JDServiceClient {
         )
         // assign roles when need device enter the bus
         this.mount(
-            this.bus.subscribe(DEVICE_ANNOUNCE, this.assignRoles.bind(this))
+            this.bus.subscribe(
+                DEVICE_ANNOUNCE,
+                this.handleDeviceAnnounce.bind(this)
+            )
         )
         // clear on unmount
         this.mount(this.clearRoles.bind(this))
@@ -230,12 +260,26 @@ export class RoleManagerClient extends JDServiceClient {
 
     private async refreshRoles() {
         if (this.unmounted) return
+        if (this._refreshing) {
+            // a collectRoles() round trip is already in flight; ask it to redo the work once done
+            // instead of racing it with a second, overlapping request
+            this._needRefresh = true
+            return
+        }
 
+        this._refreshing = true
         this._needRefresh = false
-        await this.collectRoles()
+        try {
+            await this.collectRoles()
+        } finally {
+            this._refreshing = false
+        }
 
         if (this.unmounted) return
         this.assignRoles()
+
+        // another refresh was requested while this one was in flight
+        if (this._needRefresh) this.startRefreshRoles()
     }
 
     private async collectRoles() {
@@ -265,6 +309,12 @@ export class RoleManagerClient extends JDServiceClient {
                 }
                 roles.push(role)
             }
+            // the device may return roles in a different order on every poll even when
+            // nothing changed, so sort deterministically before diffing/storing
+            roles.sort(compareRoles)
+            // a role manager swap (reconnect/service replacement) may have unmounted
+            // this client while the request was in flight; don't report stale results
+            if (this.unmounted) return
             // store result if changed
             if (JSON.stringify(roles) !== previousRolesHash) {
                 this.log(`roles updated`, roles)
@@ -276,6 +326,32 @@ export class RoleManagerClient extends JDServiceClient {
             this._needRefresh = true
             this.emit(ERROR, e)
         }
+    }
+
+    private handleDeviceAnnounce(dev: JDDevice) {
+        this.assignRoles()
+        this.bindPendingSimulatorRoles(dev)
+    }
+
+    // bind a just-announced, freshly spawned simulator device to the role(s) it was created for
+    private bindPendingSimulatorRoles(dev: JDDevice) {
+        const roles = this._pendingSimDeviceRoles.get(dev.deviceId)
+        if (!roles?.length) return
+        this._pendingSimDeviceRoles.delete(dev.deviceId)
+
+        const pool = dev
+            .services()
+            .filter(srv => !isInfrastructure(srv.specification))
+        roles.forEach(role => {
+            const index = pool.findIndex(
+                srv => srv.serviceClass === role.serviceClass
+            )
+            if (index > -1) {
+                const [service] = pool.splice(index, 1)
+                this._pendingReuseServiceKeys.add(serviceKey(service))
+                this.queueSetRole(service, role.name)
+            }
+        })
     }
 
     private assignRoles() {
@@ -291,6 +367,8 @@ export class RoleManagerClient extends JDServiceClient {
         const role = this._roles.find(
             r => r.deviceId === deviceId && r.serviceIndex === serviceIndex
         )
+        // confirmed by firmware, no longer need to keep this service reserved
+        if (role) this._pendingReuseServiceKeys.delete(serviceKey(service))
         if (service.role !== role?.name)
             this.log(`role ${service} -> ${role?.name || ""}`, { role })
         service.role = role?.name
@@ -298,6 +376,9 @@ export class RoleManagerClient extends JDServiceClient {
 
     private clearRoles() {
         this.bus.services().forEach(srv => (srv.role = undefined))
+        this._pendingSimRoleNames.clear()
+        this._pendingSimDeviceRoles.clear()
+        this._pendingReuseServiceKeys.clear()
     }
 
     hasRoleForService(service: JDService) {
@@ -312,6 +393,15 @@ export class RoleManagerClient extends JDServiceClient {
 
     role(name: string): Role {
         return this._roles.find(r => r.serviceIndex > 0 && r.name === name)
+    }
+
+    // chains a setRole() call onto the pending queue so automatic bindings never
+    // send overlapping SetRole commands to the device
+    private queueSetRole(service: JDService, name: string) {
+        this._setRoleQueue = this._setRoleQueue
+            .then(() => this.setRole(service, name))
+            .catch(e => this.log(`set role failed`, e))
+        return this._setRoleQueue
     }
 
     async setRole(service: JDService, name: string) {
@@ -365,30 +455,51 @@ export class RoleManagerClient extends JDServiceClient {
 
     startSimulators() {
         this.log(`start role sims`, { roles: this._roles })
-        const unboundRoles = this._roles.filter(
+        const allUnboundRoles = this._roles.filter(
             role => !this.bus.device(role.deviceId, true)
         )
-        if (!unboundRoles?.length) return
+        if (!allUnboundRoles?.length) return
+
+        // drop pending markers for roles that resolved (bound) or no longer exist
+        for (const name of this._pendingSimRoleNames)
+            if (!allUnboundRoles.find(role => role.name === name))
+                this._pendingSimRoleNames.delete(name)
+
+        // skip roles a previous call already started a simulator for, until they
+        // are confirmed bound; otherwise concurrent/repeated calls spawn duplicates
+        const unboundRoles = allUnboundRoles.filter(
+            role => !this._pendingSimRoleNames.has(role.name)
+        )
+        if (!unboundRoles.length) return
 
         this.log(`unbound roles: ${unboundRoles.length}`, { roles: unboundRoles })
 
-        // collect unbound services?
-        const unboundServices = this.bus.services().filter(srv => !srv.role)
+        // collect unbound services, excluding ones with an already-requested but
+        // not-yet-confirmed reuse assignment (service.role only updates on confirmation)
+        const unboundServices = this.bus
+            .services()
+            .filter(
+                srv => !srv.role && !this._pendingReuseServiceKeys.has(serviceKey(srv))
+            )
         // match unbound roles with unbound services
+        const stillUnbound: Role[] = []
         unboundRoles.forEach(role => {
-            const service = unboundServices.find(
+            const serviceIndex = unboundServices.findIndex(
                 srv => srv.serviceClass === role.serviceClass
             )
-            if (service) {
-                unboundServices.splice(unboundServices.indexOf(service), 1)
-                unboundRoles.splice(unboundRoles.indexOf(role), 1)
-                this.setRole(service, role.name)
+            if (serviceIndex > -1) {
+                const service = unboundServices[serviceIndex]
+                unboundServices.splice(serviceIndex, 1)
+                this._pendingReuseServiceKeys.add(serviceKey(service))
+                this.queueSetRole(service, role.name)
+            } else {
+                stillUnbound.push(role)
             }
         })
 
         // collect roles that need to be bound
         const todos = groupBy(
-            unboundRoles
+            stillUnbound
                 .map(role => ({
                     role,
                     hostDefinition: serviceProviderDefinitionFromServiceClass(
@@ -400,6 +511,9 @@ export class RoleManagerClient extends JDServiceClient {
         )
         this.log(`simulateable roles`, todos)
 
+        // mark all roles about to spawn a provider as pending so repeat calls skip them
+        stillUnbound.forEach(role => this._pendingSimRoleNames.add(role.name))
+
         // spawn devices with group of devices
         const parents = Object.keys(todos)
         parents.forEach(parent => {
@@ -408,15 +522,19 @@ export class RoleManagerClient extends JDServiceClient {
             if (!parent) {
                 todo.forEach(t => {
                     const serviceOptions = parseRole(t.role)
-                    addServiceProvider(
+                    const provider = addServiceProvider(
                         this.bus,
                         t.hostDefinition,
                         serviceOptions ? [serviceOptions] : undefined
                     )
+                    // bound once the new device announces, see handleDeviceAnnounce
+                    this._pendingSimDeviceRoles.set(provider.deviceId, [
+                        t.role,
+                    ])
                 })
             } else {
                 // spawn all services into 1
-                addServiceProvider(
+                const provider = addServiceProvider(
                     this.bus,
                     {
                         name: "",
@@ -427,6 +545,11 @@ export class RoleManagerClient extends JDServiceClient {
                             ),
                     },
                     todo.map(t => parseRole(t.role)).filter(q => !!q)
+                )
+                // bound once the new device announces, see handleDeviceAnnounce
+                this._pendingSimDeviceRoles.set(
+                    provider.deviceId,
+                    todo.map(t => t.role)
                 )
             }
         })
