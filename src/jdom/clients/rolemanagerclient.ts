@@ -400,7 +400,11 @@ export class RoleManagerClient extends JDServiceClient {
     private queueSetRole(service: JDService, name: string) {
         this._setRoleQueue = this._setRoleQueue
             .then(() => this.setRole(service, name))
-            .catch(e => this.log(`set role failed`, e))
+            .catch(e => {
+                this._pendingSimRoleNames.delete(name)
+                this._pendingReuseServiceKeys.delete(serviceKey(service))
+                this.log(`set role failed`, e)
+            })
         return this._setRoleQueue
     }
 
@@ -490,6 +494,7 @@ export class RoleManagerClient extends JDServiceClient {
             if (serviceIndex > -1) {
                 const service = unboundServices[serviceIndex]
                 unboundServices.splice(serviceIndex, 1)
+                this._pendingSimRoleNames.add(role.name)
                 this._pendingReuseServiceKeys.add(serviceKey(service))
                 this.queueSetRole(service, role.name)
             } else {
