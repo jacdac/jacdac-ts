@@ -536,6 +536,9 @@ export class RoleManagerClient extends JDServiceClient {
                     this._pendingSimDeviceRoles.set(provider.deviceId, [
                         t.role,
                     ])
+                    this.bindPendingSimulatorRoles(
+                        this.bus.device(provider.deviceId, true)
+                    )
                 })
             } else {
                 // spawn all services into 1
@@ -555,6 +558,9 @@ export class RoleManagerClient extends JDServiceClient {
                 this._pendingSimDeviceRoles.set(
                     provider.deviceId,
                     todo.map(t => t.role)
+                )
+                this.bindPendingSimulatorRoles(
+                    this.bus.device(provider.deviceId, true)
                 )
             }
         })
