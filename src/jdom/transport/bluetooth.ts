@@ -1,6 +1,5 @@
-import { Packet } from "../packet"
 import { Flags } from "../flags"
-import { bufferConcat } from "../utils"
+import { delay } from "../utils"
 import {
     BLUETOOTH_JACDAC_TX_CHARACTERISTIC,
     BLUETOOTH_JACDAC_RX_CHARACTERISTIC,
@@ -8,8 +7,19 @@ import {
     BLUETOOTH_TRANSPORT,
 } from "../constants"
 import { Transport } from "./transport"
+import { BluetoothChunkReassembler, toBluetoothChunks } from "./bluetoothchunks"
 
-const JD_BLE_FIRST_CHUNK_FLAG = 0x80
+/**
+ * Advertised name prefixes of devices that may expose the Jacdac Bluetooth service
+ */
+const BLE_DEVICE_NAME_PREFIXES = ["BBC micro:bit", "Calliope mini"]
+// frames waiting to be written; newer frames are dropped beyond this
+const BLE_MAX_PENDING_FRAMES = 32
+// retries of a write that failed because another GATT operation was in progress
+const BLE_WRITE_RETRIES = 5
+// announces arrive every 500ms but may be delayed or dropped by the device's
+// small transmit queue; reconnecting over Bluetooth is slow, so be more tolerant than 1s
+const BLE_PULSE_TIMEOUT = 3000
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface WebBluetoothOptions {}
@@ -67,12 +77,16 @@ function bleGetDevices(): Promise<BluetoothDevice[]> {
 
 class BluetoothTransport extends Transport {
     private _device: BluetoothDevice
+    // last device connected, reused for background reconnects
+    private _lastDevice: BluetoothDevice
     private _server: BluetoothRemoteGATTServer
     private _service: BluetoothRemoteGATTService
     private _rxCharacteristic: BluetoothRemoteGATTCharacteristic
     private _txCharacteristic: BluetoothRemoteGATTCharacteristic
-    private _rxBuffer: Uint8Array
-    private _rxChunkCounter: number
+    private readonly _reassembler = new BluetoothChunkReassembler()
+    // serializes writes: chunks of different frames must never interleave
+    private _writeQueue: Promise<void> = Promise.resolve()
+    private _pendingFrames = 0
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     constructor(options?: WebBluetoothOptions) {
@@ -87,20 +101,31 @@ class BluetoothTransport extends Transport {
         return this._device?.name
     }
 
+    protected get pulseTimeout() {
+        return BLE_PULSE_TIMEOUT
+    }
+
     protected async transportConnectAsync(background: boolean) {
         // get a device
         if (background) {
             const devices = await bleGetDevices()
-            this._device = devices?.[0]
+            const last = this._lastDevice
+            this._device =
+                (last && devices?.find(d => d.id === last.id)) ||
+                last ||
+                devices?.[0]
         } else {
             const device = await bleRequestDevice({
-                filters: [{ namePrefix: "BBC micro:bit" }],
+                filters: BLE_DEVICE_NAME_PREFIXES.map(namePrefix => ({
+                    namePrefix,
+                })),
                 optionalServices: [BLUETOOTH_JACDAC_SERVICE],
             })
             this._device = device
         }
 
         if (!this._device?.gatt) throw new Error("Device not found")
+        this._lastDevice = this._device
 
         // listen for disconnection
         this._device.addEventListener(
@@ -109,17 +134,19 @@ class BluetoothTransport extends Transport {
             false
         )
 
+        this._reassembler.reset()
+
         // connect to gatt
         this._server = await this._device.gatt.connect()
         // connect to service
         this._service = await this._server.getPrimaryService(
             BLUETOOTH_JACDAC_SERVICE
         )
-        // connect to characteristic
+        // device to PC
         this._rxCharacteristic = await this._service.getCharacteristic(
             BLUETOOTH_JACDAC_RX_CHARACTERISTIC
         )
-
+        // PC to device
         this._txCharacteristic = await this._service.getCharacteristic(
             BLUETOOTH_JACDAC_TX_CHARACTERISTIC
         )
@@ -129,38 +156,68 @@ class BluetoothTransport extends Transport {
             this.handleCharacteristicChanged,
             false
         )
-        // start listening
+        // start listening (works for notifications and indications)
         await this._rxCharacteristic.startNotifications()
     }
 
-    protected async transportSendPacketAsync(data: Uint8Array) {
+    protected transportSendPacketAsync(data: Uint8Array): Promise<void> {
         if (!this._txCharacteristic) {
             console.debug(`trying to send Bluetooth packet while disconnected`)
-            return
+            return Promise.resolve()
+        }
+        if (this._pendingFrames >= BLE_MAX_PENDING_FRAMES) {
+            if (Flags.diagnostics)
+                console.debug(`ble: write queue full, frame dropped`)
+            return Promise.resolve()
         }
 
-        const length = data.length
+        let chunks: Uint8Array[]
+        try {
+            chunks = toBluetoothChunks(data)
+        } catch (e) {
+            console.warn(e)
+            return Promise.resolve()
+        }
 
-        const totalChunks = Math.ceil(data.length / 18)
-        let remainingChunks = totalChunks == 0 ? 0 : totalChunks - 1
-        let sent = 0
-        while (sent < length) {
-            const n = Math.min(18, length - sent)
-            const chunk = data.slice(sent, sent + n)
-            const header = new Uint8Array(2)
-            header[0] = totalChunks & 0x7f
+        this._pendingFrames++
+        const write = this._writeQueue
+            .then(() => this.writeChunksAsync(chunks))
+            .catch(e => {
+                // drop the rest of this frame; a lost link is handled by
+                // the disconnect event and the pulse check
+                if (Flags.diagnostics) console.debug(`ble: write failed`, e)
+            })
+            .finally(() => this._pendingFrames--)
+        this._writeQueue = write
+        return write
+    }
 
-            if (sent == 0) header[0] |= JD_BLE_FIRST_CHUNK_FLAG
+    private async writeChunksAsync(chunks: Uint8Array[]) {
+        const characteristic = this._txCharacteristic
+        for (const chunk of chunks) {
+            // stop if disconnected or reconnected meanwhile: never send the
+            // rest of a frame over a new connection
+            if (!characteristic || characteristic !== this._txCharacteristic)
+                return
+            await this.writeChunkAsync(characteristic, chunk)
+        }
+    }
 
-            header[1] = remainingChunks
-            this._txCharacteristic.writeValueWithoutResponse(
-                bufferConcat(header, chunk)
-            )
-            sent += n
-            remainingChunks = remainingChunks == 0 ? 0 : remainingChunks - 1
-            console.debug(
-                `chunk: ${chunk.toString()} [${remainingChunks} chunks remaining]`
-            )
+    private async writeChunkAsync(
+        characteristic: BluetoothRemoteGATTCharacteristic,
+        chunk: Uint8Array
+    ) {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                if (characteristic.writeValueWithoutResponse)
+                    await characteristic.writeValueWithoutResponse(chunk)
+                else await characteristic.writeValue(chunk)
+                return
+            } catch (e) {
+                const busy = /in progress/i.test(e?.message || "")
+                if (!busy || attempt >= BLE_WRITE_RETRIES) throw e
+                await delay(5 * (attempt + 1))
+            }
         }
     }
 
@@ -177,14 +234,14 @@ class BluetoothTransport extends Transport {
                 "gattserverdisconnected",
                 this.handleDisconnected
             )
-            this._server.disconnect()
+            this._server?.disconnect()
         } finally {
             this._rxCharacteristic = undefined
             this._txCharacteristic = undefined
             this._service = undefined
             this._server = undefined
             this._device = undefined
-            this._rxBuffer = undefined
+            this._reassembler.reset()
         }
     }
 
@@ -193,38 +250,25 @@ class BluetoothTransport extends Transport {
         this.disconnect()
     }
 
-    private handleCharacteristicChanged() {
-        const data = new Uint8Array(this._rxCharacteristic.value.buffer)
-        const packetData = data.slice(2)
-        console.debug(`received length ${data.length}`)
-
-        if (data[0] & JD_BLE_FIRST_CHUNK_FLAG) {
-            if (this._rxBuffer)
-                console.error(
-                    `Dropped buffer. Chunks remaining: ${this._rxChunkCounter}`
-                )
-            this._rxBuffer = new Uint8Array()
-            this._rxChunkCounter = data[0] & 0x7f
-            console.debug(`Initial chunk counter: ${this._rxChunkCounter}`)
-        }
-
-        this._rxChunkCounter =
-            this._rxChunkCounter == 0 ? 0 : this._rxChunkCounter - 1
-        console.debug(
-            `after modification chunk counter: ${this._rxChunkCounter}`
+    private handleCharacteristicChanged(ev: Event) {
+        const value = (ev?.target as BluetoothRemoteGATTCharacteristic)?.value
+        if (!value) return
+        const chunk = new Uint8Array(
+            value.buffer,
+            value.byteOffset,
+            value.byteLength
         )
-
-        if (data[1] !== this._rxChunkCounter)
-            console.error(
-                `Data out of order. Expected chunk: ${this._rxChunkCounter} Got chunk: ${data[1]}`
+        const { droppedFrames } = this._reassembler
+        const frame = this._reassembler.push(chunk)
+        if (
+            Flags.diagnostics &&
+            this._reassembler.droppedFrames !== droppedFrames
+        )
+            console.debug(
+                `ble: incomplete frame dropped (${this._reassembler.droppedFrames} total)`
             )
-        else this._rxBuffer = bufferConcat(this._rxBuffer, packetData)
-
-        if (this._rxChunkCounter == 0) {
-            this.bus.processFrame(this._rxBuffer, BLUETOOTH_TRANSPORT)
-            this._rxBuffer = undefined
-            this._rxChunkCounter = 0
-        }
+        // handleFrame also records the receive time used by the pulse check
+        if (frame) this.handleFrame(frame)
     }
 }
 
