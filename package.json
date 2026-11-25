@@ -37,6 +37,7 @@
     "setup": "yarn pullsubmodules && yarn install --frozen-lockfile",
     "pullsubmodules": "git submodule update --init --recursive",
     "lint": "node node_modules/eslint/bin/eslint.js src/**/*.ts",
+    "test": "cross-env TS_NODE_PROJECT=tests/tsconfig.json mocha -r ./node_modules/ts-node/register \"tests/**/*.spec.ts\"",
     "prettier": "prettier --write src/**/*.ts tests/**/*.ts",
     "predist": "rm -rf dist",
     "dist": "node build.js",
